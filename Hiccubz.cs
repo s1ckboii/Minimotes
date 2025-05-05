@@ -123,11 +123,10 @@ public class Hiccubz : MonoBehaviour
         HurtEffect();
     }
 
+    /* States */
+
     private void StateIdle()
     {
-
-        // if spawned -> sit idle, do audio occasionally
-
         if (stateImpulse)
         {
             animator.SetTrigger(sitTrigger);
@@ -135,14 +134,10 @@ public class Hiccubz : MonoBehaviour
 
             SetFace(GetRandomEmotion(), 100f);
 
-            // if notices player AND is not in the cart or extraction point -> switch to StateNotice()
-
             if (playerAvatar)
             {
                 UpdateState(State.Notice);
             }
-
-            // if grabbed -> switch to StateGrabbed()
 
             if (physGrabObject.grabbed)
             {
@@ -154,9 +149,6 @@ public class Hiccubz : MonoBehaviour
 
     private void StateGrabbed()
     {
-
-        // if grabbed -> do not move (but maybe do some animations, sounds)
-
         if (stateImpulse)
         {
             animator.SetTrigger(grabbedTrigger);
@@ -167,19 +159,12 @@ public class Hiccubz : MonoBehaviour
                 StopCoroutine(emotionRoutine);
             emotionRoutine = StartCoroutine(GrabbedEmotions());
 
-            // if she was put in the cart or in extraction point -> go to sleep
-            // NOT IN CART OR EXTRACTION POINT!!! <- still need to add as an &&s
-
             if (!physGrabObject.grabbed)
             {
                 if (InCartOrExtractionPoint())
                 {
                     UpdateState(State.Stashed);
                 }
-
-                // if she was let go and not in the cart nor in extraction point -> flee the scene
-                // NOT IN CART OR EXTRACTION POINT!!! <- still need to add as an &&
-
                 else
                 {
                     stateTimer -= Time.deltaTime;
@@ -212,9 +197,6 @@ public class Hiccubz : MonoBehaviour
 
     private void StateFlee()
     {
-
-        // run away to a levelpoint far from the current location
-
         if (stateImpulse)
         {
             animator.SetBool(fleeBool, true);
@@ -239,16 +221,12 @@ public class Hiccubz : MonoBehaviour
         else
         {
             navMeshAgent.SetDestination(agentDestination);
-
-            // when she ran away to her chosen destination -> go back to idle
-
             stateTimer -= Time.deltaTime;
             if (stateTimer <= 0f)
             {
                 UpdateState(State.Idle);
             }
 
-            // if shes grabbed -> updatestate to StateGrabbed()
             if (physGrabObject.grabbed)
             {
                 stateTimer = 0f;
@@ -267,8 +245,6 @@ public class Hiccubz : MonoBehaviour
 
             SetFace(Emotion.Sleep, 100f);
 
-            // if in extraction point or in cart -> dont move (maybe do some audios)
-
             if (!InCartOrExtractionPoint())
             {
                 navMeshAgent.Enable();
@@ -276,12 +252,27 @@ public class Hiccubz : MonoBehaviour
             }
         }
     }
+    private void UpdateState(State state)
+    {
+        currentState = state;
+        stateImpulse = true;
+        animator.SetBool(sleepBool, false);
+        animator.SetBool(fleeBool, false);
+        stateTimer = 0f;
+        if (GameManager.Multiplayer())
+        {
+            photonView.RPC("UpdateStateRPC", RpcTarget.All, currentState);
+        }
+        else
+        {
+            UpdateStateRPC(currentState);
+        }
+    }
+
+    /* Extra Logic */
 
     private bool InCartOrExtractionPoint()
     {
-
-        // if in extraction point or cart(?)-> turn bool true else false
-
         return RoundDirector.instance.dollarHaulList.Contains(base.gameObject);
     }
 
@@ -302,24 +293,6 @@ public class Hiccubz : MonoBehaviour
         if (GameManager.Multiplayer())
         {
             photonView.RPC("UpdatePlayerTargetRPC", RpcTarget.All, playerAvatar.photonView.ViewID);
-        }
-    }
-
-    private void SetFace(Emotion emotionState, float weight)
-    {
-        ResetFace();
-
-        emotion = emotionState;
-        facialExpressions.SetBlendShapeWeight((int)emotionState, Mathf.Clamp(weight, 0f, 100f));
-
-        EmotionAudio(emotionState);
-    }
-
-    private void ResetFace()
-    {
-        foreach (Emotion emotionState in allEmotions)
-        {
-            facialExpressions.SetBlendShapeWeight((int)emotionState, 0f);
         }
     }
 
@@ -349,20 +322,23 @@ public class Hiccubz : MonoBehaviour
         }
     }
 
-    private void UpdateState(State state)
+    /* Emotions Logic */
+
+    private void SetFace(Emotion emotionState, float weight)
     {
-        currentState = state;
-        stateImpulse = true;
-        animator.SetBool(sleepBool, false);
-        animator.SetBool(fleeBool, false);
-        stateTimer = 0f;
-        if (GameManager.Multiplayer())
+        ResetFace();
+
+        emotion = emotionState;
+        facialExpressions.SetBlendShapeWeight((int)emotionState, Mathf.Clamp(weight, 0f, 100f));
+
+        EmotionAudio(emotionState);
+    }
+
+    private void ResetFace()
+    {
+        foreach (Emotion emotionState in allEmotions)
         {
-            photonView.RPC("UpdateStateRPC", RpcTarget.All, currentState);
-        }
-        else
-        {
-            UpdateStateRPC(currentState);
+            facialExpressions.SetBlendShapeWeight((int)emotionState, 0f);
         }
     }
 
@@ -432,6 +408,8 @@ public class Hiccubz : MonoBehaviour
                 break;
         }
     }
+
+    /* Networking */
 
     [PunRPC]
     private void UpdateStateRPC(State state)
