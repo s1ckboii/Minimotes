@@ -1,6 +1,5 @@
 ﻿using Photon.Pun;
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -10,11 +9,11 @@ public class Hiccubz : MonoBehaviour
 {
     private enum State
     {
-        Idle,
-        Grabbed,
-        Notice,
-        Stashed,
-        Flee
+        Idle, // anim done
+        Grabbed, //
+        Notice,  // redo
+        Stashed,  // sleep anim 
+        Flee  // run anim semi-done
     }
 
     public enum Emotion
@@ -132,7 +131,7 @@ public class Hiccubz : MonoBehaviour
             animator.SetTrigger(sitTrigger);
             stateImpulse = false;
 
-            SetFace(GetRandomEmotion(), 100f);
+            SetFace(IdleEmotions(), 100f);
 
             if (playerAvatar)
             {
@@ -189,9 +188,14 @@ public class Hiccubz : MonoBehaviour
             SetFace(Emotion.Notice, 100f);
         }
         stateTimer -= Time.deltaTime;
-        if (stateTimer <= 0f)
+        if (stateTimer <= 0f && !physGrabObject.grabbed)
         {
             UpdateState(State.Flee);
+        }
+        if (physGrabObject.grabbed)
+        {
+            navMeshAgent.Disable(9999f);
+            UpdateState(State.Grabbed);
         }
     }
 
@@ -243,7 +247,7 @@ public class Hiccubz : MonoBehaviour
             stateImpulse = false;
             animator.SetBool(sleepBool, true);
 
-            SetFace(Emotion.Sleep, 100f);
+            SetFace(SleepEmotions(), 100f);
 
             if (!InCartOrExtractionPoint())
             {
@@ -342,7 +346,7 @@ public class Hiccubz : MonoBehaviour
         }
     }
 
-    private Emotion GetRandomEmotion()
+    private Emotion IdleEmotions()
     {
         return ((Emotion[])[
             Emotion.Happy,
@@ -352,6 +356,17 @@ public class Hiccubz : MonoBehaviour
             Emotion.Happy,
             Emotion.Happy2,
             Emotion.Curious,
+        ]).Length)];
+    }
+
+    private Emotion SleepEmotions()
+    {
+        return ((Emotion[])[
+            Emotion.Sleep,
+            Emotion.Sleep2,
+        ])[Random.Range(0, ((Emotion[])[
+            Emotion.Sleep,
+            Emotion.Sleep2,
         ]).Length)];
     }
 
