@@ -1,5 +1,6 @@
 ﻿using Photon.Pun;
 using System.Collections;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -48,6 +49,8 @@ public class Hiccubz : MonoBehaviour
 
     private float hurtLerp;
     private float stateTimer;
+    private float grabbed2Timer;
+    private float grabbed3Timer;
 
     private int hurtAmount;
     private int defaultLayerMask;
@@ -72,16 +75,16 @@ public class Hiccubz : MonoBehaviour
 
     private static readonly Emotion[] allEmotions = (Emotion[])System.Enum.GetValues(typeof(Emotion));
 
-    // I might need to add more / change some from trigger to boolean - I really didnt give this much thought yet
-
     private static readonly int sitTrigger = Animator.StringToHash("idleSit");
     private static readonly int grabbedTrigger = Animator.StringToHash("grabbed");
-    private static readonly int noticeTrigger = Animator.StringToHash("noticeAndStandUp");
-    private static readonly int fleeBool = Animator.StringToHash("runAway");
-    private static readonly int sleepBool = Animator.StringToHash("sleeping");
+    private static readonly int grabbed2Trigger = Animator.StringToHash("grabbed2");
+    private static readonly int grabbed3Trigger = Animator.StringToHash("grabbed3");
+    private static readonly int noticeTrigger = Animator.StringToHash("notice");
+    private static readonly int fleeTrigger = Animator.StringToHash("runAway");
+    private static readonly int sleepTrigger = Animator.StringToHash("sleeping");
     private void Awake()
     {
-		navMeshAgent = GetComponent<EnemyNavMeshAgent>();
+        navMeshAgent = GetComponent<EnemyNavMeshAgent>();
         vision = GetComponent<EnemyVision>();
         photonView = GetComponent<PhotonView>();
         physGrabObject = GetComponent<PhysGrabObject>();
@@ -132,17 +135,17 @@ public class Hiccubz : MonoBehaviour
             stateImpulse = false;
 
             SetFace(IdleEmotions(), 100f);
-
-            if (playerAvatar)
-            {
-                UpdateState(State.Notice);
-            }
-
-            if (physGrabObject.grabbed)
-            {
-                navMeshAgent.Disable(9999f);
-                UpdateState(State.Grabbed);
-            }
+        }
+        
+        if (playerAvatar)
+        {
+            UpdateState(State.Notice);
+        }
+        
+        if (physGrabObject.grabbed)
+        {
+            navMeshAgent.Disable(9999f);
+            UpdateState(State.Grabbed);
         }
     }
 
@@ -152,28 +155,42 @@ public class Hiccubz : MonoBehaviour
         {
             animator.SetTrigger(grabbedTrigger);
             stateImpulse = false;
-            stateTimer = 1f;
+
+            stateTimer = 5f;
+            grabbed2Timer = 4f;
+            grabbed3Timer = 3f;
 
             if (emotionRoutine != null)
                 StopCoroutine(emotionRoutine);
             emotionRoutine = StartCoroutine(GrabbedEmotions());
+        }
 
-            if (!physGrabObject.grabbed)
+        stateTimer -= Time.deltaTime;
+        if (stateTimer <= 0f)
+        {
+            animator.SetTrigger(grabbed2Trigger);
+            grabbed2Timer -= Time.deltaTime;
+            if (grabbed2Timer <= 0f)
             {
-                if (InCartOrExtractionPoint())
-                {
-                    UpdateState(State.Stashed);
-                }
-                else
-                {
-                    stateTimer -= Time.deltaTime;
-                    if (stateTimer <= 0f)
-                    {
-                        navMeshAgent.Enable();
-                        UpdateState(State.Notice);
-                    }
-                }
+                animator.SetTrigger(grabbed3Trigger);
             }
+        }
+        
+        if (!physGrabObject.grabbed)
+        {
+            if (InCartOrExtractionPoint())
+            {
+                UpdateState(State.Stashed);
+            }
+            else
+            {
+                grabbed3Timer -= Time.deltaTime;
+                if (grabbed3Timer <= 0f)
+                {
+                    navMeshAgent.Enable();
+                    UpdateState(State.Notice);
+                }
+            }            
         }
     }
 
@@ -203,7 +220,7 @@ public class Hiccubz : MonoBehaviour
     {
         if (stateImpulse)
         {
-            animator.SetBool(fleeBool, true);
+            animator.SetTrigger(fleeTrigger);
             stateImpulse = false;
             stateTimer = Random.Range(8f, 12f);
 
@@ -226,7 +243,7 @@ public class Hiccubz : MonoBehaviour
         {
             navMeshAgent.SetDestination(agentDestination);
             stateTimer -= Time.deltaTime;
-            if (stateTimer <= 0f)
+            if (stateTimer <= 0f && !physGrabObject.grabbed)
             {
                 UpdateState(State.Idle);
             }
@@ -245,23 +262,34 @@ public class Hiccubz : MonoBehaviour
         if (stateImpulse)
         {
             stateImpulse = false;
-            animator.SetBool(sleepBool, true);
+            animator.SetTrigger(sitTrigger);
+            SetFace(Emotion.Blank, 100f);
 
-            SetFace(SleepEmotions(), 100f);
-
+            stateTimer = 4f;
+        }        
+        if (!physGrabObject.grabbed)
+        {
+            if (stateTimer <= 0f)
+            {
+                SetFace(SleepEmotions(), 100f);
+                animator.SetTrigger(sleepTrigger);
+            }
             if (!InCartOrExtractionPoint())
             {
                 navMeshAgent.Enable();
                 UpdateState(State.Notice);
             }
         }
+        else if (physGrabObject.grabbed)
+        {
+            stateTimer = 0f;
+            UpdateState(State.Grabbed);
+        }
     }
     private void UpdateState(State state)
     {
         currentState = state;
         stateImpulse = true;
-        animator.SetBool(sleepBool, false);
-        animator.SetBool(fleeBool, false);
         stateTimer = 0f;
         if (GameManager.Multiplayer())
         {
@@ -348,26 +376,27 @@ public class Hiccubz : MonoBehaviour
 
     private Emotion IdleEmotions()
     {
-        return ((Emotion[])[
+        Emotion[] idleOptions =
+        {
             Emotion.Happy,
             Emotion.Happy2,
-            Emotion.Curious,
-        ])[Random.Range(0, ((Emotion[])[
-            Emotion.Happy,
-            Emotion.Happy2,
-            Emotion.Curious,
-        ]).Length)];
+            Emotion.Curious
+        };
+
+        return idleOptions[Random.Range(0, idleOptions.Length)];
     }
 
     private Emotion SleepEmotions()
     {
-        return ((Emotion[])[
+        Emotion[] sleepOptions =
+{
             Emotion.Sleep,
             Emotion.Sleep2,
-        ])[Random.Range(0, ((Emotion[])[
-            Emotion.Sleep,
-            Emotion.Sleep2,
-        ]).Length)];
+            Emotion.Happy,
+            Emotion.Happy2
+        };
+
+        return sleepOptions[Random.Range(0, sleepOptions.Length)];
     }
 
     private IEnumerator GrabbedEmotions()
