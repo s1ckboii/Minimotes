@@ -1,20 +1,20 @@
 ﻿using Photon.Pun;
 using System.Collections;
-using System.Threading;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-namespace AlienValuable;
+namespace Minimotes;
 
 public class Hiccubz : MonoBehaviour
 {
     private enum State
     {
-        Idle, // anim done
-        Grabbed, //
-        Notice,  // redo
-        Stashed,  // sleep anim 
-        Flee  // run anim semi-done
+        Idle,
+        Grabbed,
+        Notice,
+        Stashed,
+        Flee
     }
 
     public enum Emotion
@@ -46,14 +46,16 @@ public class Hiccubz : MonoBehaviour
 
     private bool stateImpulse;
     private bool hurtImpulse;
+    private bool startPos;
 
     private float hurtLerp;
     private float stateTimer;
-    private float grabbed2Timer;
-    private float grabbed3Timer;
+    private float calmdownTimer;
 
     private int hurtAmount;
     private int defaultLayerMask;
+
+    private List<Material> hurtableMaterials = [];
 
     private Coroutine emotionRoutine;
 
@@ -68,7 +70,6 @@ public class Hiccubz : MonoBehaviour
 
     public SkinnedMeshRenderer facialExpressions;
     public SpringQuaternion horizontalRotationSpring;
-    public Material hurtableMaterial;
     public Animator animator;
     public AnimationCurve hurtCurve;
     public Emotion emotion = Emotion.Blank;
@@ -77,8 +78,6 @@ public class Hiccubz : MonoBehaviour
 
     private static readonly int sitTrigger = Animator.StringToHash("idleSit");
     private static readonly int grabbedTrigger = Animator.StringToHash("grabbed");
-    private static readonly int grabbed2Trigger = Animator.StringToHash("grabbed2");
-    private static readonly int grabbed3Trigger = Animator.StringToHash("grabbed3");
     private static readonly int noticeTrigger = Animator.StringToHash("notice");
     private static readonly int fleeTrigger = Animator.StringToHash("runAway");
     private static readonly int sleepTrigger = Animator.StringToHash("sleeping");
@@ -88,15 +87,17 @@ public class Hiccubz : MonoBehaviour
         vision = GetComponent<EnemyVision>();
         photonView = GetComponent<PhotonView>();
         physGrabObject = GetComponent<PhysGrabObject>();
+        defaultLayerMask = LayerMask.GetMask("Default");
         hurtAmount = Shader.PropertyToID("_ColorOverlayAmount");
         hurtCurve = AssetManager.instance.animationCurveImpact;
-        defaultLayerMask = LayerMask.GetMask("Default");
+        if (facialExpressions != null)
+        {
+            hurtableMaterials.AddRange(facialExpressions.sharedMaterials);
+        }
+
         UpdateState(State.Idle);
-
-        LevelPoint startHere = SemiFunc.LevelPointGet(base.transform.position, 0f, 15f);
-
-        navMeshAgent.Warp(startHere.transform.position);
     }
+
 
     private void Update()
     {
@@ -135,18 +136,18 @@ public class Hiccubz : MonoBehaviour
             stateImpulse = false;
 
             SetFace(IdleEmotions(), 100f);
+
+            if (playerAvatar)
+            {
+                UpdateState(State.Notice);
+            }
+
+            if (physGrabObject.grabbed)
+            {
+                UpdateState(State.Grabbed);
+            }
         }
-        
-        if (playerAvatar)
-        {
-            UpdateState(State.Notice);
-        }
-        
-        if (physGrabObject.grabbed)
-        {
-            navMeshAgent.Disable(9999f);
-            UpdateState(State.Grabbed);
-        }
+        GetStartingPos();
     }
 
     private void StateGrabbed()
@@ -156,24 +157,17 @@ public class Hiccubz : MonoBehaviour
             animator.SetTrigger(grabbedTrigger);
             stateImpulse = false;
 
-            stateTimer = 5f;
-            grabbed2Timer = 4f;
-            grabbed3Timer = 3f;
+            stateTimer = 1f;
+            calmdownTimer = 4f;
 
             if (emotionRoutine != null)
                 StopCoroutine(emotionRoutine);
             emotionRoutine = StartCoroutine(GrabbedEmotions());
         }
-
-        stateTimer -= Time.deltaTime;
-        if (stateTimer <= 0f)
+        calmdownTimer -= Time.deltaTime;
+        if (calmdownTimer <= 0f)
         {
-            animator.SetTrigger(grabbed2Trigger);
-            grabbed2Timer -= Time.deltaTime;
-            if (grabbed2Timer <= 0f)
-            {
-                animator.SetTrigger(grabbed3Trigger);
-            }
+            animator.SetTrigger(sitTrigger);
         }
         
         if (!physGrabObject.grabbed)
@@ -184,10 +178,9 @@ public class Hiccubz : MonoBehaviour
             }
             else
             {
-                grabbed3Timer -= Time.deltaTime;
-                if (grabbed3Timer <= 0f)
+                stateTimer -= Time.deltaTime;
+                if (stateTimer <= 0f)
                 {
-                    navMeshAgent.Enable();
                     UpdateState(State.Notice);
                 }
             }            
@@ -211,7 +204,6 @@ public class Hiccubz : MonoBehaviour
         }
         if (physGrabObject.grabbed)
         {
-            navMeshAgent.Disable(9999f);
             UpdateState(State.Grabbed);
         }
     }
@@ -251,7 +243,6 @@ public class Hiccubz : MonoBehaviour
             if (physGrabObject.grabbed)
             {
                 stateTimer = 0f;
-                navMeshAgent.Disable(9999f);
                 UpdateState(State.Grabbed);
             }
         }
@@ -276,7 +267,6 @@ public class Hiccubz : MonoBehaviour
             }
             if (!InCartOrExtractionPoint())
             {
-                navMeshAgent.Enable();
                 UpdateState(State.Notice);
             }
         }
@@ -288,21 +278,39 @@ public class Hiccubz : MonoBehaviour
     }
     private void UpdateState(State state)
     {
-        currentState = state;
-        stateImpulse = true;
-        stateTimer = 0f;
-        if (GameManager.Multiplayer())
+        if (currentState != state)
         {
-            photonView.RPC("UpdateStateRPC", RpcTarget.All, currentState);
-        }
-        else
-        {
-            UpdateStateRPC(currentState);
+            currentState = state;
+            stateImpulse = true;
+            stateTimer = 0f;
+            if (GameManager.Multiplayer())
+            {
+                photonView.RPC("UpdateStateRPC", RpcTarget.All, currentState);
+            }
+            else
+            {
+                UpdateStateRPC(currentState);
+            }
         }
     }
 
     /* Extra Logic */
-
+    private void GetStartingPos()
+    {
+        if (!startPos)
+        {
+            startPos = true;
+            LevelPoint startHere = SemiFunc.LevelPointGet(base.transform.position, 0f, 15f);
+            if (startHere != null)
+            {
+                navMeshAgent.Warp(startHere.transform.position);
+            }
+        }
+        else
+        {
+            return;
+        }
+    }
     private bool InCartOrExtractionPoint()
     {
         return RoundDirector.instance.dollarHaulList.Contains(base.gameObject);
@@ -344,12 +352,15 @@ public class Hiccubz : MonoBehaviour
         {
             hurtLerp += 2.5f * Time.deltaTime;
             hurtLerp = Mathf.Clamp01(hurtLerp);
-            hurtableMaterial.SetFloat(hurtAmount, hurtCurve.Evaluate(hurtLerp));
-            if (hurtLerp >= 1f)
+            foreach (var hurtableMaterial in hurtableMaterials)
             {
+                hurtableMaterial.SetFloat(hurtAmount, hurtCurve.Evaluate(hurtLerp));
+                if (hurtLerp >= 1f)
+                {
                     hurtLerp = 0f;
                     hurtImpulse = false;
                     hurtableMaterial.SetFloat(hurtAmount, 0f);
+                }
             }
         }
     }
