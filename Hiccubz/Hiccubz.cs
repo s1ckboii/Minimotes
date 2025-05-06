@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
-namespace Minimotes;
+namespace Minimotes.Hiccubz;
 
 public class Hiccubz : MonoBehaviour
 {
@@ -14,7 +14,7 @@ public class Hiccubz : MonoBehaviour
         Grabbed,
         Notice,
         Stashed,
-        Flee
+        Flee 
     }
 
     public enum Emotion
@@ -46,7 +46,6 @@ public class Hiccubz : MonoBehaviour
 
     private bool stateImpulse;
     private bool hurtImpulse;
-    private bool startPos;
 
     private float hurtLerp;
     private float stateTimer;
@@ -54,8 +53,6 @@ public class Hiccubz : MonoBehaviour
 
     private int hurtAmount;
     private int defaultLayerMask;
-
-    private List<Material> hurtableMaterials = [];
 
     private Coroutine emotionRoutine;
 
@@ -67,12 +64,13 @@ public class Hiccubz : MonoBehaviour
     public AudioClip sleep;
     public AudioClip sad;
 
-
     public SkinnedMeshRenderer facialExpressions;
     public SpringQuaternion horizontalRotationSpring;
     public Animator animator;
     public AnimationCurve hurtCurve;
     public Emotion emotion = Emotion.Blank;
+
+    private readonly List<Material> hurtableMaterials = [];
 
     private static readonly Emotion[] allEmotions = (Emotion[])System.Enum.GetValues(typeof(Emotion));
 
@@ -94,8 +92,9 @@ public class Hiccubz : MonoBehaviour
         {
             hurtableMaterials.AddRange(facialExpressions.sharedMaterials);
         }
-
         UpdateState(State.Idle);
+
+        StartingPos();
     }
 
 
@@ -147,7 +146,6 @@ public class Hiccubz : MonoBehaviour
                 UpdateState(State.Grabbed);
             }
         }
-        GetStartingPos();
     }
 
     private void StateGrabbed()
@@ -218,7 +216,7 @@ public class Hiccubz : MonoBehaviour
 
             SetFace(Emotion.Scared, 100f);
 
-            LevelPoint levelPoint = SemiFunc.LevelPointGet(base.transform.position, 25f, 999f);
+            LevelPoint levelPoint = SemiFunc.LevelPointGet(transform.position, 25f, 999f);
             if (levelPoint != null &&
                 NavMesh.SamplePosition(levelPoint.transform.position + Random.insideUnitSphere * 3f, out var hit, 5f, -1) &&
                 Physics.Raycast(hit.position, Vector3.down, 5f, defaultLayerMask))
@@ -295,25 +293,17 @@ public class Hiccubz : MonoBehaviour
     }
 
     /* Extra Logic */
-    private void GetStartingPos()
+    private void StartingPos()
     {
-        if (!startPos)
-        {
-            startPos = true;
-            LevelPoint startHere = SemiFunc.LevelPointGet(base.transform.position, 0f, 15f);
-            if (startHere != null)
-            {
-                navMeshAgent.Warp(startHere.transform.position);
-            }
-        }
-        else
-        {
-            return;
-        }
+        LevelPoint hitpos = SemiFunc.LevelPointGet(base.transform.position, 0f, 15f);
+        base.transform.position = hitpos.transform.position;
+
+        navMeshAgent.Warp(hitpos.transform.position);
     }
+
     private bool InCartOrExtractionPoint()
     {
-        return RoundDirector.instance.dollarHaulList.Contains(base.gameObject);
+        return RoundDirector.instance.dollarHaulList.Contains(gameObject);
     }
 
     private void RotationLogic()
@@ -325,7 +315,7 @@ public class Hiccubz : MonoBehaviour
             horizontalRotationSpring.speed = 15f;
             horizontalRotationSpring.damping = 0.8f;
         }
-        base.transform.rotation = SemiFunc.SpringQuaternionGet(horizontalRotationSpring, horizontalRotationTarget);
+        transform.rotation = SemiFunc.SpringQuaternionGet(horizontalRotationSpring, horizontalRotationTarget);
     }
     public void OnVision()
     {
@@ -366,7 +356,6 @@ public class Hiccubz : MonoBehaviour
     }
 
     /* Emotions Logic */
-
     private void SetFace(Emotion emotionState, float weight)
     {
         ResetFace();
