@@ -1,4 +1,5 @@
-﻿using Photon.Pun;
+﻿using ExitGames.Client.Photon.StructWrapping;
+using Photon.Pun;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -19,7 +20,6 @@ public class Hiccubz : MonoBehaviour
 
     public enum Emotion
     {
-        Blank,
         Happy,
         Happy2,
         Notice,
@@ -32,10 +32,11 @@ public class Hiccubz : MonoBehaviour
         Sleep2
     }
 
-    private EnemyNavMeshAgent navMeshAgent;
+    private NavMeshAgent navMeshAgent;
     private EnemyVision vision;
     private PhotonView photonView;
     private PhysGrabObject physGrabObject;
+    private Rigidbody rb;
 
     private PlayerAvatar playerAvatar;
 
@@ -68,7 +69,7 @@ public class Hiccubz : MonoBehaviour
     public SpringQuaternion horizontalRotationSpring;
     public Animator animator;
     public AnimationCurve hurtCurve;
-    public Emotion emotion = Emotion.Blank;
+    public Emotion emotion = Emotion.Happy;
 
     private readonly List<Material> hurtableMaterials = [];
 
@@ -81,7 +82,7 @@ public class Hiccubz : MonoBehaviour
     private static readonly int sleepTrigger = Animator.StringToHash("sleeping");
     private void Awake()
     {
-        navMeshAgent = GetComponent<EnemyNavMeshAgent>();
+        rb = GetComponent<Rigidbody>();
         vision = GetComponent<EnemyVision>();
         photonView = GetComponent<PhotonView>();
         physGrabObject = GetComponent<PhysGrabObject>();
@@ -90,11 +91,10 @@ public class Hiccubz : MonoBehaviour
         hurtCurve = AssetManager.instance.animationCurveImpact;
         if (facialExpressions != null)
         {
-            hurtableMaterials.AddRange(facialExpressions.sharedMaterials);
+            hurtableMaterials.AddRange(facialExpressions.materials);
         }
-        UpdateState(State.Idle);
-
-        StartingPos();
+        navMeshAgent = GetComponent<NavMeshAgent>();
+        StartCoroutine(WaitForNavMesh());
     }
 
 
@@ -120,19 +120,24 @@ public class Hiccubz : MonoBehaviour
                     StateStashed();
                     break;
             }
+            RotationLogic();
+            HurtEffect();
         }
-        RotationLogic();
-        HurtEffect();
+
     }
 
     /* States */
 
     private void StateIdle()
     {
+        if (rb.isKinematic)
+        {
+            rb.isKinematic = false;
+        }
         if (stateImpulse)
         {
-            animator.SetTrigger(sitTrigger);
             stateImpulse = false;
+            animator.SetTrigger(sitTrigger);
 
             SetFace(IdleEmotions(), 100f);
 
@@ -150,10 +155,15 @@ public class Hiccubz : MonoBehaviour
 
     private void StateGrabbed()
     {
+        if (navMeshAgent.enabled && !rb.isKinematic)
+        {
+            navMeshAgent.enabled = false;
+            rb.isKinematic = true;
+        }
         if (stateImpulse)
         {
-            animator.SetTrigger(grabbedTrigger);
             stateImpulse = false;
+            animator.SetTrigger(grabbedTrigger);
 
             stateTimer = 1f;
             calmdownTimer = 4f;
@@ -170,6 +180,11 @@ public class Hiccubz : MonoBehaviour
         
         if (!physGrabObject.grabbed)
         {
+            if (!navMeshAgent.enabled && rb.isKinematic)
+            {
+                navMeshAgent.enabled = true;
+                rb.isKinematic = false;
+            }
             if (InCartOrExtractionPoint())
             {
                 UpdateState(State.Stashed);
@@ -189,8 +204,8 @@ public class Hiccubz : MonoBehaviour
     {
         if (stateImpulse)
         {
-            animator.SetTrigger(noticeTrigger);
             stateImpulse = false;
+            animator.SetTrigger(noticeTrigger);
             stateTimer = 1f;
 
             SetFace(Emotion.Notice, 100f);
@@ -210,8 +225,8 @@ public class Hiccubz : MonoBehaviour
     {
         if (stateImpulse)
         {
-            animator.SetTrigger(fleeTrigger);
             stateImpulse = false;
+            animator.SetTrigger(fleeTrigger);
             stateTimer = Random.Range(8f, 12f);
 
             SetFace(Emotion.Scared, 100f);
@@ -252,7 +267,7 @@ public class Hiccubz : MonoBehaviour
         {
             stateImpulse = false;
             animator.SetTrigger(sitTrigger);
-            SetFace(Emotion.Blank, 100f);
+            SetFace(Emotion.Happy, 100f);
 
             stateTimer = 4f;
         }        
@@ -293,12 +308,25 @@ public class Hiccubz : MonoBehaviour
     }
 
     /* Extra Logic */
-    private void StartingPos()
-    {
-        LevelPoint hitpos = SemiFunc.LevelPointGet(base.transform.position, 0f, 15f);
-        base.transform.position = hitpos.transform.position;
 
-        navMeshAgent.Warp(hitpos.transform.position);
+    private IEnumerator WaitForNavMesh()
+    {
+        yield return new WaitForSeconds(2f);
+        if (NavMesh.SamplePosition(base.transform.position, out var navHit, 20f, -1))
+        {
+            base.transform.position = navHit.position;
+            WaitForPos();
+        }
+    }
+
+    private IEnumerator WaitForPos()
+    {
+        yield return new WaitForSeconds(2f);
+        if (NavMesh.SamplePosition(base.transform.position, out var navHit, 20f, -1))
+        {
+            navMeshAgent.enabled = true;
+            navMeshAgent.Warp(navHit.position);
+        }
     }
 
     private bool InCartOrExtractionPoint()
@@ -308,21 +336,25 @@ public class Hiccubz : MonoBehaviour
 
     private void RotationLogic()
     {
-        if (navMeshAgent.AgentVelocity.normalized.magnitude > 0.1f)
+        if (navMeshAgent.velocity.normalized.magnitude > 0.1f)
         {
-            horizontalRotationTarget = Quaternion.LookRotation(navMeshAgent.AgentVelocity.normalized);
+            horizontalRotationTarget = Quaternion.LookRotation(navMeshAgent.velocity.normalized);
             horizontalRotationTarget.eulerAngles = new Vector3(0f, horizontalRotationTarget.eulerAngles.y, 0f);
             horizontalRotationSpring.speed = 15f;
             horizontalRotationSpring.damping = 0.8f;
         }
         transform.rotation = SemiFunc.SpringQuaternionGet(horizontalRotationSpring, horizontalRotationTarget);
     }
+
     public void OnVision()
     {
-        playerAvatar = vision.onVisionTriggeredPlayer;
-        if (GameManager.Multiplayer())
+        if (SemiFunc.IsMasterClientOrSingleplayer())
         {
-            photonView.RPC("UpdatePlayerTargetRPC", RpcTarget.All, playerAvatar.photonView.ViewID);
+            playerAvatar = vision.onVisionTriggeredPlayer;
+            if (GameManager.Multiplayer())
+            {
+                photonView.RPC("UpdatePlayerTargetRPC", RpcTarget.All, playerAvatar.photonView.ViewID);
+            }
         }
     }
 
@@ -406,15 +438,15 @@ public class Hiccubz : MonoBehaviour
             Emotion.Scared,
             Emotion.Sad,
             Emotion.Angry,
-            Emotion.Blank,
-            Emotion.Curious
+            Emotion.Curious,
+            Emotion.Happy
         ])
         {
             SetFace(e, 100f);
             yield return new WaitForSeconds(Random.Range(3f, 4f));
         }
 
-        SetFace(Emotion.Blank, 0f);
+        SetFace(Emotion.Happy, 0f);
     }
 
     private IEnumerator HurtEmotions()
